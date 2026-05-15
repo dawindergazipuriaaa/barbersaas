@@ -1,0 +1,36 @@
+import { auth } from "@/lib/auth";
+import connectDb from "@/lib/db";
+import Barber from "@/model/barber";
+import { NextResponse } from "next/server";
+
+
+export async function POST(req:Request){
+    try {
+        const session = await auth()
+        if(!session || session.user.role === "ADMIN"){
+            return NextResponse.json(
+                { message:"Unauthorized" },
+                {status:401})
+        }
+        const body = await req.json();
+        const {name, email, phone, workingDays, workingHours, lunchBreak, services} = body;
+        if( !name || !email || !phone || !workingDays || !workingHours || !lunchBreak || !services){
+            return NextResponse.json(
+                {message: "Some field/fields is/are Missing."},
+                {status:400})
+        }
+        await connectDb();
+        const barber = await Barber.create({
+            name, email, phone,isActive:true, workingDays, workingHours, lunchBreak, services
+        })
+        return NextResponse.json(
+            {message: "Barber Added Successfully", barber},
+            {status:201})
+    } catch (error) {
+        console.error("error while adding barber",error);
+        return NextResponse.json(
+            {message:"Server Error"},
+            {status:500}
+        )
+    }
+}

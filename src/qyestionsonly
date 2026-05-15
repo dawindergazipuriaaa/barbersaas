@@ -1,0 +1,588 @@
+Topic 1: Authentication, Authorization & Security (Printable Master Sheet - Part 1)
+Section A: NextAuth Setup (Credentials vs. Google OAuth)
+Easy (Concepts)
+
+What is the primary difference between how NextAuth handles a Google OAuth login versus a custom Credentials login in your app?
+
+Why did you choose to support both Google OAuth and Credentials instead of just one? What is the business value for a premium barber shop?
+
+In your authOptions.ts, you explicitly declare pages: { signIn: '/login' }. What does this do under the hood in NextAuth?
+Moderate (Your Code)
+
+I see in your Credentials authorize function, you check if(!user.password). Why is this specific check necessary when you also support Google OAuth?
+
+Walk me through your Google signIn callback. How does your app determine if a user signing in via Google should be an ADMIN or a USER?
+
+In your signUp POST route, you determine the role with role = email === ownerEmail ? "ADMIN" : "USER". What are the security risks of hardcoding the owner's email into the environment variables versus having an admin dashboard to assign roles?
+
+When a user logs in with Google, you check if they exist in the DB. If they don't, you create a new User document. How do you ensure this DB call doesn't slow down the OAuth redirect excessively?
+Hard (Edge Cases)
+
+A user creates an account with Google OAuth. A month later, they try to log in using the Credentials form with the same email. Walk me through the exact error path your code takes to handle this.
+
+How would you refactor your current authOptions to support "Account Linking" (allowing a user to add a password to their Google-created account later)?
+
+If the Google OAuth provider goes down, how does your app gracefully handle the failure for users attempting to click the "Log In with GOOGLE" button?
+
+Section B: JWT Callbacks vs. Database Sessions
+Easy (Concepts)
+11. You chose strategy: 'jwt' in your NextAuth config. What is the fundamental difference between a JWT session and a Database session?
+12. Why are JWTs considered stateless?
+13. What is the purpose of the AUTH_SECRET environment variable in relation to your JWTs?
+Moderate (Your Code)
+14. Walk me through the jwt callback in your authOptions.ts. Why do you have to manually assign token.role = user.role?
+15. In that same jwt callback, you have an else block that does a database lookup (User.findOne({email})). Why is a database call happening inside a stateless JWT callback?
+16. Look at your session callback. Why must you pass data from the token to the session.user object? Why doesn't NextAuth just pass the token directly to the frontend?
+Hard (Edge Cases)
+17. You set the maxAge of your JWT to 15 days (1000*60*60*24*15). If an Admin's privileges are revoked in the database on day 2, their JWT still says "ADMIN" for 13 more days. How do you solve this stale token problem?
+18. Your JWT contains the user's ID, email, name, and role. Is this payload encrypted or just base64 encoded? Can the user read the contents of their own JWT?
+19. If your AUTH_SECRET gets leaked, what is the exact step-by-step process you must take to secure the application?
+
+Section C: Next.js Middleware (proxy.ts) & Route Protection
+Easy (Concepts)
+20. What is Next.js Middleware, and at what point in the request lifecycle does it execute?
+21. Why is Middleware generally faster for route protection than using a useEffect on the client side?
+22. What does the matcher array do in your config export at the bottom of your middleware file?
+Moderate (Your Code)
+23. In your proxy.ts, you use getToken({req, secret: process.env.AUTH_SECRET}). How does this function know where to find the JWT? Which cookie is it reading?
+24. Explain this logic: if(token?.role !== "ADMIN"){ return NextResponse.redirect(...) }. What HTTP status code does NextResponse.redirect send back to the browser?
+25. You intercept requests to /adminDashboard and /userDashboard. If an unauthenticated user tries to hit /api/admin/bookings, does your middleware protect that API route? If not, where is that protected?
+Hard (Edge Cases)
+26. You named your middleware function proxy, but exported it using a standard function declaration. In Next.js App Router, how does the framework actually recognize this file if it's not exported as middleware?
+27. Middleware runs on the Edge runtime in Next.js. If you wanted to check the user's role directly against your MongoDB database inside the middleware instead of trusting the JWT, why would that cause a crash or timeout?
+28. A user manipulates their browser to spoof the next-auth.session-token cookie. How does your middleware validate that the token hasn't been forged?
+
+Section D: OTP Generation, Schema, and Expiry Logic
+Easy (Concepts)
+29. What is the primary purpose of an OTP in your sign-up flow?
+30. In your OTP Mongoose schema, you have a purpose enum containing "VERIFY EMAIL" and "RESET PASSWORD". Why separate OTPs by purpose rather than just having a generic code?
+31. What is the benefit of setting expiresAt directly in the database schema?
+Moderate (Your Code)
+32. In your sign-up route, you generate the OTP using Math.floor(100000 + (Math.random() * 900000)).toString(). Explain how this math guarantees exactly a 6-digit number.
+33. Walk me through the OTP Verification POST route. You check if(!record). What are the three conditions that could cause record to be null or false based on your OTP.findOne query?
+34. After successful verification, you set record.used = true and user.isVerified = true. Why is it important to mark the OTP as used rather than just deleting the document?
+Hard (Edge Cases)
+35. Math.random() is not cryptographically secure. For an enterprise-grade application, what Node.js built-in library should you use to generate OTPs instead, and why?
+36. If a malicious user writes a script to hit your OTP verification endpoint with 10,000 different 6-digit combinations in one minute, how does your current architecture handle this brute-force attack?
+37. A user requests an OTP, waits 9 minutes, requests a second OTP, and then tries to use the first OTP 30 seconds later. Based on your current database queries, will the first OTP still work? Why or why not?
+
+Section E: Bcrypt & Password Security
+Easy (Concepts)
+38. You are using bcryptjs. What is a "hash" and how does it differ from "encryption"?
+39. What is the purpose of "salting" a password before hashing it?
+Moderate (Your Code)
+40. In your sign-up route, you use bcrypt.hash(password, 10). Why is this asynchronous, and why did you choose 10 for the cost factor?
+41. In authOptions.ts, you use bcrypt.compare(password, user.password). Since the hash contains the salt, how does bcrypt.compare know which salt was used to hash the original password?
+Hard (Edge Cases)
+42. Your bcrypt.compare function takes a few hundred milliseconds to run. If an attacker sends a password they know is wrong, and measures exactly how many milliseconds the server takes to respond, they can perform a "timing attack" to guess if an email exists in your system. How do you mitigate timing attacks in authentication routes?Topic 2: Database Design, Mongoose & Performance (Printable Master Sheet - Batch 2)
+Section A: Mongoose Connection Caching (lib/db.ts)
+Easy (Concepts)
+
+What is connection pooling in MongoDB, and why is it important for web applications?
+
+Why do we need to connect to the database inside the API route in Next.js (App Router) instead of just connecting once at the top level of a server file like we would in a traditional Express app?
+
+What does the mongoose dependency do that the native mongodb driver doesn't do?
+Moderate (Your Code)
+
+Walk me through your connectDb function. What is the specific purpose of the global.mongoose = {conn: null, promise: null} logic?
+
+What happens if two Next.js API routes are hit at the exact same millisecond during a "cold start"? How does your cached.promise logic prevent your app from opening multiple redundant connections?
+
+You check if(cached.conn) return cached.conn. Explain the concept of a "singleton" pattern and how this code implements it.
+Hard (Edge Cases)
+
+If you deploy this Next.js app to Vercel (which uses serverless functions), how does the serverless architecture impact your MongoDB connection limits compared to a traditional VPS deployment?
+
+What is a "MongoDB connection leak"? If your lib/db.ts file had a bug and was leaking connections, what symptoms would the agency's client experience on the live website?
+
+Section B: Schema Design & Data Modeling
+Easy (Concepts)
+9. In Mongoose, what is the difference between an embedded document (a subdocument) and a referenced document (ref: 'Barber')?
+10. Why is it a good practice to set lowercase: true and trim: true on fields like email in your Barber and User schemas?
+Moderate (Your Code)
+11. In your BookingSchema, you embedded items: [BookingItemSchema]. Why did you choose to embed the services directly into the booking rather than creating a separate Services collection and referencing them by ID?
+12. You defined { _id: false } inside your BookingItemSchema. What does this do, and why is it a best practice for this specific array of services?
+13. Your User schema has role: { enum: ["USER", "ADMIN"] }. Why use an enum here instead of a simple string validation?
+Hard (Edge Cases)
+14. Suppose the agency client changes their pricing structure next year, increasing the "Deluxe Package" from $200 to $250. Does your current BookingSchema architecture preserve the historical price of $200 for past bookings, or will past invoices dynamically update to $250? Walk me through how your schema handles this.
+15. The client decides to open a second barber shop location in Mississauga. How would you restructure these Mongoose schemas to support a multi-tenant architecture without breaking the current Brampton booking logic?
+
+Section C: Compound Indexes & Race Conditions
+Easy (Concepts)
+16. What is a database index, and why is it crucial for read-heavy applications like an appointment calendar?
+17. You created an index on { date: 1, time: 1, barberId: 1 }. What does the 1 represent in MongoDB indexing syntax?
+Moderate (Your Code)
+18. Explain exactly how bookingSchema.index({date: 1, time: 1, barberId: 1}, {unique: true}) enforces data integrity at the database level rather than the application code level.
+19. In your Booking POST route, your catch block explicitly checks if(error.code === 11000). What specific MongoDB error is this?
+20. Why is catching error 11000 considered the only truly safe way to prevent double bookings, compared to simply running a Booking.findOne() check right before saving?
+Hard (Edge Cases)
+21. Imagine User A and User B load the checkout page simultaneously. They both see 10:00 AM as available. They both click "Confirm Booking" at the exact same millisecond. Walk me through the micro-operations in the MongoDB engine that guarantee only one of them gets the slot.
+22. Does creating multiple unique compound indexes slow down your database's write speeds? Why or why not? How do you balance read speed vs. write speed?
+
+Section D: IP-Based Rate Limiting & Abuse Prevention
+Easy (Concepts)
+23. What is rate-limiting, and why is it essential for public-facing forms (like your booking checkout)?
+24. Explain the difference between a 429 Too Many Requests HTTP status and a 401 Unauthorized status.
+Moderate (Your Code)
+25. In your Booking POST route, you extract the IP using req.headers.get("x-forwarded-for"). Why is checking this specific header necessary in deployed environments (like Vercel), rather than just reading the raw socket IP connection?
+26. Your rate limiter counts documents matching the ipAddress where the status is 'open'. Why is it important to filter by status here instead of just counting all bookings ever made by that IP?
+Hard (Edge Cases)
+27. If the barber shop gets extremely popular and 60 college students try to book appointments using their campus Wi-Fi library (which shares one public IP router), your system will block legitimate customers from booking. How would you redesign this abuse protection to be more precise?
+28. Counting documents with await Booking.countDocuments(...) on every single POST request can become expensive as the database grows to thousands of records. How could you optimize this rate-limiter logic using a tool like Redis?
+29. A malicious user discovers your limit is 50 bookings per IP. They write an automated bot that rotates through proxy IP addresses to book every single slot for the next month. How would you upgrade your backend to detect and stop a distributed bot attack?
+
+Section E: Performance Optimization (.lean and populate)
+Easy (Concepts)
+30. What does the Mongoose populate() method do? Under the hood, is it one database query or two?
+31. What is the downside of using populate() compared to storing all the required data inside a single document?
+Moderate (Your Code)
+32. I noticed you append .lean() to your GET requests (e.g., Booking.find().lean()). What is the exact performance difference between a standard Mongoose query and a .lean() query?
+33. If you use .lean(), you lose access to Mongoose document methods like .save() or .populate() on that specific result object. In your architecture, why is this an acceptable trade-off for your GET routes?
+Hard (Edge Cases)
+34. Explain the "N+1 query problem." Does Mongoose's populate() suffer from the N+1 problem under the hood when populating an array of 100 bookings?
+35. If you had to query 10,000 bookings and populate the Barber's details for each one, populate() would become a massive memory bottleneck. How would you rewrite that specific query using a MongoDB Aggregation Pipeline ($lookup) instead?
+
+Section F: Architecture Trade-Offs (NoSQL vs. SQL)
+Easy (Concepts)
+36. Name one major advantage of using NoSQL (MongoDB) over SQL (PostgreSQL) when an agency is building rapid prototypes for clients.
+37. What does ACID compliance mean in database architecture?
+Moderate (Your Code)
+38. In your app, a Booking requires a Barber ID, a User ID, and a list of Services. This is highly relational. If you were forced to migrate this app to PostgreSQL tomorrow, how would you design the tables (with Foreign Keys) to replace your items: [BookingItemSchema] array?
+39. Does MongoDB handle ACID transactions differently than a traditional SQL database?
+Hard (Edge Cases)
+40. You used MongoDB transactions (session.startTransaction()) for your Leave-Scheduling feature. If MongoDB is distributed across a Replica Set (multiple servers), how does a multi-document transaction affect write latency?
+41. If the agency's client asked for complex financial reporting—e.g., "Write a query that shows me the total revenue per barber, per specific service, grouped by month, cross-referenced with the cancellation reasons"—would you rather write that reporting query in MongoDB or PostgreSQL? Defend your choice.Topic 3: Complex Business Logic & State Management (Printable Master Sheet - Batch 3)Section A: React Context API & The Shopping Cart (cartContext.tsx)Easy (Concepts)What specific problem does the React Context API solve in your application compared to standard "prop drilling"?What is the difference between client-side state management (like React Context) and server-side state (like database records) when handling a shopping cart?Why must a component using useContext be wrapped in a <CartProvider> higher up in the component tree?Moderate (Your Code)Walk me through your addToCart function. Specifically explain the logic: prev.find((item)=>item.id === service.id) ? prev : [...prev, service]. Why are you returning prev if the item is found instead of mapping over it?You use useEffect to initialize the cart from localStorage. Why do you wrap JSON.parse(storedCart) inside a try/catch block? What could go wrong there?You have a second useEffect that listens to [cart] and updates localStorage. Explain how this creates a reactive synchronization loop between your React state and the browser's storage.Hard (Edge Cases)In Next.js (App Router), components default to Server Components. Your cartContext.tsx has 'use client' at the top. If a user loads the page, the server renders the HTML before localStorage is accessible. This causes a "Hydration Mismatch Error." How exactly does your empty initial cart state (useState<Servicetype[]>([])) combined with your useEffect prevent this app-breaking error?A user opens your Barber Shop website in Tab A and adds the "Deluxe Package" to their cart. They open Tab B, navigate to the cart, and the cart is empty. Why does this happen with your current localStorage setup, and how would you use the window.addEventListener('storage', ...) event to fix it?If a user clears their browser cookies and cache while navigating to the checkout page, what happens to their selected cart state in your app, and how does your UI react to an empty payload hitting the /api/booking route?Section B: The Availability Algorithm (availability/route.ts)Easy (Concepts)10. What is an algorithmic "nested loop," and why is it generally something to be careful with regarding performance?11. When dealing with dates in JavaScript, what is the difference between a UTC date string and a Local timezone date string?12. Why do you use .toLocaleDateString("en-US", { weekday: "short" }) instead of just hardcoding an array of days?Moderate (Your Code)13. Let's look at your /api/availability route. You start with const allSlots = ["10:00", "10:30", ... "21:30"]. You then filter over these slots. Inside that filter, you use barbers.some(). Explain the difference between .filter and .some in the context of this specific business rule.14. Walk me through your "Leave Check" logic (barber.timeOff?.some(...)). You check leave.fullDay. If it's a partial day, you check slotTime >= leave.start && slotTime <= leave.end. What happens if leave.start is null but leave.end has a value?15. In your "Past Time Blocker" logic, you check if (date === todayStr && slotTime <= currentTime). If a user is booking at 1:15 PM, does this block the 1:30 PM slot, or just the 1:00 PM slot? Walk through the string comparison logic.Hard (Edge Cases)16. Big-O Notation: Your availability route iterates over 24 slots. Inside, it iterates over $B$ barbers. Inside that, it iterates over $L$ leaves and $K$ bookings. This makes your time complexity roughly $O(24 \times B \times (L + K))$. If the agency scales this app to 50 barbers with thousands of bookings, this endpoint will become incredibly slow. How would you refactor this using "Hash Maps" (Lookup Dictionaries) to drop the time complexity to $O(1)$ for the lookups?17. What happens if a barber's working shift crosses midnight? (e.g., a special event from 10:00 PM to 02:00 AM). Your current logic checks if (slotTime < start || slotTime >= end). Will this logic break if end is "02:00" and start is "22:00"? How do you fix this?18. Your algorithm relies heavily on new Date(). If your Vercel server is deployed in the AWS us-east-1 region (Virginia, EST) but your client is in Vancouver (PST), whose time does new Date() reflect on the server? How do you prevent timezone drift?Section C: Frontend State & Admin Calendar (AdminCalendar.tsx)Easy (Concepts)19. What is the difference between "Derived State" and "Local State" in React?20. Why do you use a Record<string, any> (an object) to map bookings instead of keeping them in an array?Moderate (Your Code)21. Walk me through your bookingMap .reduce function. You create a key using ${barberId}-${booking.time}. Why is this specific string combination acting as your unique identifier?22. In BarberGrid.tsx, your getSlotStatus function returns "booked", "free", "lunch", "leave", or "off-shift". How do these explicit string returns make your Tailwind class generation cleaner compared to using multiple boolean flags (e.g., isBooked, isLunch)?23. When an admin clicks to "cancel" a booking, you run fetch('/api/admin/bookings/[id]', { method: 'PATCH' }), and then call fetchbookings(dateStr) again. Why did you choose to refetch the data from the server instead of just optimistically updating the bookings state array locally?Hard (Edge Cases)24. If two admins are logged into the dashboard simultaneously, and Admin A cancels a booking at 10:00 AM, Admin B will still see that slot as "Booked" until they change the calendar date. How would you architect real-time synchronization (e.g., WebSockets or Server-Sent Events) so Admin B's screen updates instantly?25. In AdminCalendar.tsx, you do timezone offset math: new Date(selectedDate.getTime() - (offset * 60 * 1000)). Explain exactly why this math is required when passing a date from the react-calendar component into an toISOString().split("T")[0] format. What bug happens if you delete this math?Section D: The "Undo Delete" Memory Management (BarberListShow.tsx)Easy (Concepts)26. What is a memory leak in JavaScript?27. What is the difference between setTimeout and setInterval?Moderate (Your Code)28. Walk me through confirmDelete. You update state locally (isDeleted: true), and then set a setTimeout for 10 seconds before actually hitting the database with deleteFromDatabase(). Why is this "Optimistic UI" approach better for user experience than a standard browser window.confirm() alert?29. Look at your undoDelete function. You call clearTimeout(undoItem.timer). Walk me through exactly what happens if you forget to include this line.Hard (Edge Cases)30. Let's say the Admin clicks "Delete" on Barber A. The 10-second timer starts. 2 seconds later, they click "Delete" on Barber B. Since your state pendingDelete and undoItem are single objects (not arrays), does clicking "Delete" on Barber B overwrite the timer for Barber A? Does Barber A get permanently deleted, or does the timer break? Walk me through the race condition in your state management.31. If the user clicks "Delete", the 10-second timer starts, and then the user navigates away from the /dashboard/adminDashboard page to the /prices page. The React component unmounts. Does the setTimeout still fire? Will the API route be called? If it fails, how do you use the useEffect cleanup function to prevent memory leaks on unmount?Section E: Package & Service Data Structure (data/packages.ts)Easy (Concepts)32. What is the benefit of keeping your PACKAGES and service arrays in a hardcoded .ts file instead of fetching them from the MongoDB database?33. What is TypeScript's Record<string, PackageType> utility type, and why did you use it for PACKAGES?Moderate (Your Code)34. In your Prices component, you use Object.entries(PACKAGES).map(([key, pkg]) => ...). Walk me through what Object.entries does to your object, and why you couldn't just use .map() directly on PACKAGES.35. When mapping your packages, you pass the key to the URL: <Link href="{'/booking?package=${key}'}">. In your Booking page, you read this using searchParams.get("package") and load it into the cart. How does this routing strategy improve the user experience compared to making them manually select the package on the booking page?Hard (Edge Cases)36. Your hardcoded data structure means that if the agency owner wants to change the price of a "Skin Fade" from $35 to $40, a developer has to push a code change to Vercel. Walk me through the exact architectural steps required to migrate services.ts into an Admin-controlled MongoDB collection.37. If you migrate services to MongoDB, but keep PACKAGES hardcoded, how do you ensure that the total price of the "Groom Package" stays accurate if the individual prices of the services inside that package change dynamically in the database?
+Topic 4: API Route Architecture & Robustness (Printable Master Sheet - Batch 4)
+Section A: Next.js Route Handlers & REST Principles
+Easy (Concepts)
+
+In the Next.js App Router, what is the difference between a Route Handler (route.ts) and a Server Action? Why did you choose Route Handlers for this app?
+
+What is the difference between the standard web Request / Response objects and Next.js's NextRequest / NextResponse?
+
+Explain the semantic difference between a POST request, a PUT request, and a PATCH request in RESTful API design.
+Moderate (Your Code)
+
+Look at your PATCH route for canceling a booking. There is a comment: // NEXT.JS 16 FIX: You MUST await params before using the id. Explain why the Next.js core team changed params to a Promise, and what error occurs if you forget to await it.
+
+In your GET availability route, you parse the query string using const { searchParams } = new URL(req.url). Why do you have to do this manually in App Router APIs instead of just reading req.query.date like in older Express/Next.js versions?
+
+In your API routes, you consistently return JSON structured like { success: true, message: "..." }. Why is standardizing your API response envelope critical when working with a frontend team at an agency?
+Hard (Edge Cases)
+
+Idempotency: A REST API DELETE route is supposed to be "idempotent." If a client deletes a Barber, but their Wi-Fi drops and their browser automatically retries the same DELETE request 3 seconds later, what exactly does your API return on that second request, and does it crash?
+
+If a malicious user sends a 50MB JSON payload to your POST booking route (e.g., trying to crash your server memory), how does Next.js handle incoming body payload sizes by default, and how would you restrict it?
+
+Section B: Zod Validation & Payload Safety
+Easy (Concepts)
+9. What specific problem does Zod solve that TypeScript interfaces do not?
+10. Why is it a bad practice to trust client-side form validation (like HTML5 required attributes) without also doing server-side validation?
+Moderate (Your Code)
+11. In your authentication API, you use signUpSchema.safeParse(body). What is the crucial difference between .safeParse() and .parse()? Which one throws an error that crashes the route if left uncaught?
+12. Walk me through this line of your code: const firstError = Object.values(parsed.error.flatten().fieldErrors)[0]?.[0]. Why are you flattening the Zod error, and why are you specifically targeting the [0] index?
+13. In your Booking API, you use a custom validator function validateBookingInput(payload). Why check if (data.items.length === 0) inside the validator instead of letting Mongoose catch it at the database level?
+Hard (Edge Cases)
+14. Your Zod schema for passwords uses regex: .regex(/[^A-Za-z0-9]/, "Password must contain atleast one Special symbol"). A user accidentally enters a password with a hidden Unicode zero-width space character. Will this regex accept it as a special character? How do you prevent unexpected Unicode characters in payloads?
+15. What is "Prototype Pollution"? If you passed the raw req.json() body directly into a MongoDB find() query without validating it through Zod first, how could an attacker manipulate the database?
+
+Section C: MongoDB Transactions (The Leave Scheduler)
+Easy (Concepts)
+16. What is a Database Transaction?
+17. What does the acronym "ACID" stand for in the context of database transactions?
+18. If you are updating two different collections, why is a transaction safer than just awaiting two separate Mongoose .update() calls?
+Moderate (Your Code)
+19. Let's look at your Barber Leave API (POST). Walk me through the exact execution order of session.startTransaction(), updating the Barber document, updating the Booking documents, and finally session.commitTransaction().
+20. In that same API route, you have a catch block that triggers await session.abortTransaction(). What exactly happens to the data inside MongoDB when this runs? Does the Barber's leave still get recorded?
+21. There is a comment in your code: // If we don't commit, MongoDB deletes the data instantly. What happens to the transaction lock if you forget to commitTransaction() and the function returns a response to the user?
+Hard (Edge Cases)
+22. MongoDB requires a "Replica Set" to use transactions. If you deploy your app to a free, standalone MongoDB instance that doesn't support replica sets, your Leave API will instantly crash with an error. How would you architect this logic safely without using transactions if forced to use a standalone database?
+23. Race Condition within a Transaction: What happens if Admin A starts a transaction to schedule a leave for Barber John on Friday, but at that exact millisecond, Customer B successfully books an appointment for Friday? How does MongoDB resolve this write conflict during the commitTransaction() phase?
+
+Section D: HTTP Status Codes & Error Handling
+Easy (Concepts)
+24. What is the difference between a 401 Unauthorized and a 403 Forbidden status code? Which one should you use if an authenticated USER tries to hit the DELETE Barber route?
+25. What does a 500 Internal Server Error mean, and why should you avoid exposing the raw database error message to the client when a 500 occurs?
+Moderate (Your Code)
+26. In your POST booking route, if the IP rate limit is exceeded, you return status: 429. What does 429 mean, and how should a well-designed frontend UI handle this specific status code?
+27. When a user tries to book a slot that is already taken, you catch the 11000 error and return a status: 409. What does 409 mean, and why is it more semantically correct than a generic 400 Bad Request here?
+28. Look at your PATCH booking route. If !booking is found in the database, you return status: 404. If the user is unauthenticated, you return 401. Why does an agency care about this level of HTTP precision instead of just sending 200 OK with { success: false } every time?
+Hard (Edge Cases)
+29. You have several try/catch blocks wrapping your APIs. If a catastrophic bug causes a RangeError: Maximum call stack size exceeded before the try/catch can properly format the JSON response, Next.js will crash the route and send back an unformatted HTML error page. How does your frontend UI handle an unexpected HTML response when it is calling await res.json()?
+30. If your API routes take more than 10 seconds to execute (e.g., waiting for an external email API to send a confirmation), Vercel's hobby tier will automatically timeout the serverless function and return a 504 Gateway Timeout. How do you design your frontend to recover from a 504 timeout when the user clicks "Confirm Booking"?
+Topic 5: Frontend UI, UX, & Component Architecture (Printable Master Sheet - Batch 5)
+Section A: Client Components vs. Server Components (RSC)
+Easy (Concepts)
+
+In the Next.js App Router, all components are Server Components by default. What does this mean, and why is it a massive performance advantage?
+
+What specific React features force you to add 'use client' to the top of a file?
+
+Does adding 'use client' mean the component is only rendered in the user's browser and completely skips Server-Side Rendering (SSR)? Explain how Next.js handles initial loads for Client Components.
+Moderate (Your Code)
+
+Let's look at ShowBarber.tsx and BarberListShow.tsx. You fetch the database data in ShowBarber (Server Component) and pass it as a prop to BarberListShow (Client Component). Why is this "Fetch on Server, Pass to Client" pattern preferred over just fetching via /api inside a useEffect on the client?
+
+In ShowBarber.tsx, you pass the data like this: JSON.parse(JSON.stringify(barberList)). Why does Next.js throw a serialization error if you try to pass the raw Mongoose document directly to a Client Component?
+Hard (Edge Cases)
+
+You have a deeply nested interactive component (like BookingModal) inside a Server Component tree. How do you prevent the 'use client' directive from "poisoning" or cascading down to components that don't actually need client-side interactivity?
+
+If your Hero.tsx component had an interactive carousel that required 'use client', how would that affect your Largest Contentful Paint (LCP) SEO metric, and how could you mitigate the performance hit?
+
+Section B: Tailwind CSS & Styling Architecture
+Easy (Concepts)
+8. What is utility-first CSS, and why do agencies often prefer Tailwind CSS over traditional .scss or CSS Modules for team collaboration?
+9. How does Tailwind ensure that your final production CSS file isn't massive (containing thousands of unused classes)?
+Moderate (Your Code)
+10. In BookingModal.tsx, you use template literals for conditional styling: className={`... ${isSelected ? 'bg-amber-500 text-black' : 'border-white/30 text-white'}`}. Why is it dangerous to dynamically construct Tailwind class names (e.g., 'bg-' + colorVar + '-500')?
+11. You use custom classes like bg-golden and text-goldenbg. Where and how exactly are these configured in a Next.js Tailwind project so the compiler recognizes them?
+Hard (Edge Cases)
+12. In AdminCalendar.tsx, you used dangerouslySetInnerHTML to inject raw <style> tags to override .react-calendar classes. Why is dangerouslySetInnerHTML a security risk (XSS), and how else could you have forced Tailwind to override external library CSS (e.g., using @layer or global CSS)?
+13. If the agency asks you to implement a "Dark Mode / Light Mode" toggle across the entire Barber App, walk me through the architectural steps required to implement this globally using Tailwind and Next.js App Router without causing UI flickering on reload.
+
+Section C: Modals, Z-Index, and the DOM
+Easy (Concepts)
+14. What is the CSS z-index property, and what is a "Stacking Context"?
+15. Why do modals often bug out and appear behind other elements even if their z-index is set to 9999?
+Moderate (Your Code)
+16. In your ServicesModal, you use fixed inset-y-1 inset-x-30 backdrop-blur-3xl z-51. Why did you use fixed positioning instead of absolute?
+17. If a user opens the BookingModal but continues to scroll their mouse wheel, the background page will scroll underneath the modal. From a UX perspective, how do you lock the document.body scroll when a modal mounts, and restore it when it unmounts?
+Hard (Edge Cases)
+18. Explain how React Portals (createPortal) work. Why is it an industry best practice to render modals using Portals attached to document.body rather than keeping them nested deeply inside components like AdminCalendar.tsx?
+19. Accessibility (a11y): When your modal opens, a screen reader user might tab out of the modal and interact with the hidden background elements. How do you implement "Focus Trapping" so the keyboard <Tab> key loops only within the open modal?
+
+Section D: UI/UX Component State & Race Conditions
+Easy (Concepts)
+20. In React, what triggers a component to re-render?
+21. What is the difference between a controlled input and an uncontrolled input in a React form?
+Moderate (Your Code)
+22. In BarberListShow.tsx, you manage pendingDelete, undoItem, leaveModel, and viewLeavesModel all in separate useState hooks. As the component grows, how would utilizing the useReducer hook make this complex state logic cleaner and more predictable?
+23. In your BookingModal, if the user clicks "Confirm Booking" rapidly 5 times before the server responds, it will trigger 5 POST requests. How do you implement debouncing, or how do you correctly disable the button during the asynchronous fetch request?
+Hard (Edge Cases)
+24. Your app calculates the total price of the cart dynamically: cart.reduce((total, item) => total + item.price, 0). If your cart had 10,000 items (unlikely for a barber, but theoretically), this recalculation would freeze the UI on every render. How does the useMemo hook prevent unnecessary expensive recalculations?
+25. Optimistic UI: When toggling a barber's active status (toggleActiveStatus), you immediately update the UI state, make the fetch request, and revert the UI if the fetch fails. What happens if the user clicks the toggle three times quickly? How do you ensure the UI state doesn't get desynced from the actual database state during rapid clicks?
+
+Section E: Next.js Optimization (Images & Links)
+Easy (Concepts)
+26. What are the specific performance benefits of using the Next.js <Image> component over a standard HTML <img> tag?
+27. Why should you use the Next.js <Link> component instead of a standard <a> tag for internal navigation?
+Moderate (Your Code)
+28. In your Gallery component, you render images using width={200} height={200} but also apply inline styles style={{ width: "350px", height: "350px", objectFit: "cover" }}. Why does Next.js require the width and height props, and how does this prevent Cumulative Layout Shift (CLS)?
+29. In your Hero component, you added the priority prop to the background image. What exactly does this tell the browser to do during the parsing of the HTML document?
+Hard (Edge Cases)
+30. Your Gallery.tsx has a loadMore function that increases visibleCount by 4. If the agency uploads 1,000 high-res images to the gallery, rendering 1,000 DOM nodes will eventually crash the mobile browser's memory, even if they are lazy-loaded. How do you implement "DOM Virtualization" (e.g., using react-window) to solve this?
+🟢 Phase 1: Easy (Core Syntax, Tooling, and "What" Questions)
+These questions validate your fundamental knowledge of the libraries and explicit syntax used in your Next.js auth implementation.
+
+Zod & Type Safety
+
+What is Zod, and why did you choose it over other validation libraries like Yup or Joi for this project?
+
+In validators/auth.ts, you use z.infer<typeof signUpSchema>. What exactly does z.infer do during compilation?
+
+What is the difference between a Zod schema and a TypeScript interface in your project?
+
+In your passwordSchema, what does the regex /[A-Z]/ enforce?
+
+How does the regex /[^A-Za-z0-9]/ in your passwordSchema guarantee a special character?
+
+In the signUpSchema, what validation does .email("Invalid email address") provide out of the box?
+
+You created an otpSchema requiring exactly 6 digits. How does Zod handle a user inputting a 6-character string of letters instead of numbers?
+
+In the logInSchema, why do you reuse the passwordSchema instead of just using z.string()?
+
+What is the difference between safeParse (used in your signup route) and parse in Zod?
+
+If signUpSchema.safeParse(body) fails, what boolean value is assigned to parsed.success?
+
+Bcrypt & Password Handling
+11. What is bcryptjs, and why did you use it instead of plain bcrypt or standard crypto hashing?
+12. In your /api/auth/signUp route, you use bcrypt.hash(password, 10). What does the 10 represent?
+13. Why is it important to salt passwords before hashing them?
+14. How does bcrypt.compare(password, user.password) in your NextAuth authorize function work if the salt is randomly generated during signup?
+15. Why shouldn't you store plain-text passwords in your MongoDB User collection?
+16. Is bcrypt hashing synchronous or asynchronous in your implementation? Why does that matter for an API route?
+
+NextAuth.js Configuration
+17. What is NextAuth.js, and what primary problem does it solve in a Next.js App Router project?
+18. You configured two providers in authOptions.ts: Google and Credentials. What is the difference between OAuth and Credential-based auth?
+19. In your authOptions, what does the session: { strategy: 'jwt' } configuration do?
+20. Why did you set maxAge: 1000 * 60 * 60 * 24 * 15 in your NextAuth session config? How long is this in days?
+21. What is the purpose of the pages: { signIn: '/login' } block in authOptions?
+22. Where does NextAuth look for the AUTH_SECRET environment variable by default?
+23. In the Credentials provider, what is the purpose of the credentials object (with email and password labels)?
+24. How do you import and initialize NextAuth in the App Router (app/api/auth/[...nextauth]/route.ts)?
+25. What is the difference between getServerSession and the useSession hook?
+
+MongoDB & Mongoose Auth Models
+26. In your User model, why is the password field set to required: false?
+27. What does the lowercase: true and trim: true configuration on the email field in Mongoose do?
+28. In the OTP model, you have a purpose field with an enum ["VERIFY EMAIL", "RESET PASSWORD"]. What happens if you try to save an OTP with the purpose "LOGIN"?
+29. What is the purpose of the ref: "User" property on the userId field in the OTP schema?
+30. What does { timestamps: true } add to your User and OTP schemas?
+
+🟡 Phase 2: Moderate (Data Flow, Logic Branches, and "How" Questions)
+These questions test your ability to explain the logic flow between the client, the API, the database, and the NextAuth lifecycle.
+
+Signup Route Logic
+31. Walk me through the exact step-by-step execution of your POST request in /api/auth/signUp.
+32. You extract errors using Object.values(parsed.error.flatten().fieldErrors)[0]?.[0]. Explain what flatten() does to a Zod error object.
+33. Why do you manually apply .toLowerCase().trim() to the email in your API route when Mongoose already has those constraints?
+34. Explain your admin assignment logic: const role = email === ownerEmail ? "ADMIN" : "USER".
+35. How does your OTP generation math Math.floor(100000 + (Math.random() * 900000)).toString() guarantee a 6-digit number?
+36. In the OTP creation step, you set expiresAt: new Date(Date.now() + 1000 * 60 * 10). Exactly how long is this OTP valid for?
+37. If a user signs up but never verifies their OTP, what state is their User document in?
+
+NextAuth Credentials Provider
+38. In the authorize function, how do you handle a user who registered via Google but tries to log in with a password?
+39. Walk me through the error handling inside the authorize function. How do those thrown errors surface to the client frontend?
+40. Why do you return an object containing id, name, email, image, and role at the end of the authorize function? Where does that object go next?
+41. If bcrypt.compare returns false, what exactly happens to the login request?
+
+NextAuth Google Provider & Callbacks
+42. Explain the logic inside your signIn({ user, account }) callback. Why are you creating a user in the database here?
+43. If a user logs in with Google, you set isVerified: true automatically. Why is this a safe assumption to make?
+44. How does your system assign the ADMIN role if the business owner logs in via Google for the first time?
+45. In the jwt({ token, user }) callback, you have an if (user) block. Under what specific condition does the user object exist in this callback?
+46. You have an else block in the jwt callback that queries the database (User.findOne({email})). Why is this database call necessary on subsequent token validations?
+47. What is the relationship between the jwt callback and the session callback? How does data flow from one to the other?
+48. In the session callback, you do session.user.id = token.id. Why is modifying the next-auth.d.ts type declaration file necessary to prevent TypeScript errors here?
+
+OTP Verification Route
+49. Walk me through the POST request in your OTP verification route.
+50. You query the OTP collection using userId, code, purpose: "VERIFY EMAIL", and used: false. Why is checking used: false critical?
+51. If the OTP is valid, you run user.save() and record.save(). What happens if user.save() succeeds but record.save() fails?
+52. How does the frontend know if the OTP was invalid or expired based on your API response?
+
+Middleware & Proxy Protection
+53. In your proxy.ts middleware file, what does the getToken({ req, secret }) function do?
+54. Why do you use getToken in Edge Middleware instead of getServerSession?
+55. Walk me through the exact logic of this line: if(!token && (url.pathname.startsWith('/adminDashboard') || url.pathname.startsWith('/userDashboard')))
+56. If an authenticated user with a "USER" role tries to navigate to /adminDashboard/settings, what happens step-by-step in your middleware?
+57. Explain how the matcher config array at the bottom of your middleware file optimizes your application's performance.
+
+🔴 Phase 3: Tough (Architecture, Security Vulnerabilities, and "Why" Questions)
+These questions challenge your architectural decisions, system design, security edge cases, and handling of race conditions.
+
+Database Integrity & Transactions
+58. In your signup route, you save a User, and then you save an OTP. If the MongoDB server crashes exactly between those two operations, you have a User without an OTP. How would you use a Mongoose Transaction (Session) to fix this?
+59. Your OTP model has an expiresAt field. Does MongoDB automatically delete the document when this time passes? If not, what specific feature (like a TTL Index) do you need to implement?
+60. You are doing a .findOne({ email }) during signup. If two users submit the same email at the exact same millisecond, could two identical users be created? How does a unique index in MongoDB prevent this race condition?
+
+Security Vulnerabilities & Edge Cases
+61. Your OTP logic does not implement rate-limiting. How could a malicious actor abuse your /api/auth/signUp route, and what impact would it have on your database and email service?
+62. In your authorize function, an attacker tries millions of passwords against a known email. How does bcrypt's processing time actually act as a defense against brute-force attacks compared to MD5?
+63. If a user signs up with Google, their password field is empty. If an attacker figures out a way to bypass your frontend validation and sends an empty password to your Credentials login, how does your backend logic handle bcrypt.compare with an undefined password? (Hint: you handle this with if(!user.password)).
+64. In your jwt callback, if the user.role is missing, you query the database. Doesn't querying the database on every single protected route navigation defeat the purpose of using a stateless JWT? How could you optimize this?
+65. If you fire an employee and change their role from ADMIN to USER in the MongoDB database, how long will they still have access to the admin dashboard? (Hint: Token staleness vs. maxAge).
+66. How would you architect a solution to instantly revoke a compromised JWT in your current NextAuth setup?
+67. Your signUpSchema forces strong passwords, but your logInSchema also uses passwordSchema. If you ever decide to relax your password rules in the future, how will this affect users with older, "weaker" passwords trying to log in?
+
+Type Declaration Extensions
+68. You extended the NextAuth types using declare module "next-auth". What happens during the build process if you try to access session.user.role without this declaration file?
+69. Why do you need to extend both User, Session, and JWT interfaces? Why isn't extending just the Session enough?
+
+Middleware & Route Handlers
+70. Your middleware intercepts routes starting with /adminDashboard. If you create a highly sensitive backend API route at /api/admin/delete-database, is it protected by your current middleware? Why or why not?
+71. How would you update your middleware's matcher array to securely encompass both client pages and API routes for admins?
+72. If a user accesses your site from a location with high latency, how does the middleware execution time impact the Time to First Byte (TTFB) of your protected pages?
+
+Advanced NextAuth Features
+73. Why didn't you use the official @next-auth/mongodb-adapter to handle your users and sessions automatically? What are the pros and cons of your custom credential/callback approach versus the official database adapter?
+74. In your Google signIn callback, you use ownerEmail === email ? "ADMIN" : "USER". If the owner changes their email address in the future, how does this hardcoded environment variable approach scale?
+75. If you wanted to add Two-Factor Authentication (2FA) using an Authenticator app (TOTP) on top of this flow, where in the NextAuth lifecycle (which callbacks or custom pages) would you inject that step?
+
+Code Reviews & Improvements (The "What's wrong with this code?" questions)
+76. Look at your OTP verification route: const body = req.json(). In Next.js App Router, req.json() returns a Promise. What bug does omitting the await keyword here introduce?
+77. In your signup route, const hashedPassword = await bcrypt.hash(password, 10). If you increased the salt rounds to 14 to be more secure, what impact would that have on the Vercel serverless function timeout limits?
+78. Your OTP generation logic allows a leading zero to be mathematically impossible (Math.floor(100000...) always starts with 1-9). If you wanted to allow 045912 as a valid OTP, how would you refactor your generation logic?
+79. You use Date.now() + 1000 * 60 * 10 for OTP expiry. How does server clock drift across distributed serverless edge nodes potentially affect OTP validation?
+80. In your proxy middleware, what happens if process.env.AUTH_SECRET is undefined in production? How does getToken behave?
+⚛️ Domain 1: React & State Management (Client-Side)
+These questions focus on your cartContext, hook usage, and component lifecycle.
+
+🟢 Easy
+
+Why did you use the Context API (cartContext.tsx) for managing the booking cart instead of passing props down manually?
+
+In your CartProvider, you use localStorage.setItem("cart", JSON.stringify(cart)) inside a useEffect. What is the purpose of this?
+
+What is the difference between useState and useRef, and why is useState the correct choice for tracking the selectedSlot in your booking component?
+
+In AdminCalendar.tsx, what does the useEffect dependency array [selectedDate] do?
+
+🟡 Moderate
+5. When initializing your cart state from localStorage, you wrap it in a try...catch block. What specific error are you preventing here?
+6. In your Next.js application, why must components using useCart or useState have the 'use client' directive at the very top? What happens if you omit it?
+7. In the PriceList component, you determine if an item is in the cart using cart.some((c) => c.id === s.id). What is the time complexity of this operation, and would it scale poorly if the service list had thousands of items?
+8. Explain the race condition that could occur if a user clicks "Confirm Booking" twice very quickly. How does your isLoading or disabled button state prevent this in React?
+
+🔴 Tough
+9. localStorage is synchronous and can block the main thread. If your cart data became extremely large, how might this impact performance during the initial render, and how could you mitigate it?
+10. In Next.js, hydration mismatches occur when the server-rendered HTML differs from the client-rendered HTML. Because localStorage is only available on the client, how did you ensure your CartProvider doesn't cause a hydration error on the first paint?
+11. You are fetching availability every time bookingDate changes in a useEffect. If a user rapidly clicks through 5 different dates, you might fire 5 API requests, and the responses might return out of order. How would you implement an AbortController to cancel stale requests?
+
+🗄️ Domain 2: Database Design & Mongoose Integration
+These questions target your schema design, rate limiting, and serverless database connections.
+
+🟢 Easy
+12. Why do you use mongoose.models.Barber || mongoose.model("Barber", BarberSchema) instead of just mongoose.model()?
+13. In your Booking schema, what does ref: "Barber" on the barberId field do?
+14. You set { timestamps: true } on your schemas. What two fields does Mongoose automatically manage because of this?
+15. What is the difference between a String and a Schema.Types.ObjectId in MongoDB?
+
+🟡 Moderate
+16. In db.ts, you implement a caching mechanism (global.mongoose). Why is caching the database connection critical in a serverless framework like Next.js? What happens if you don't do this?
+17. You implemented a compound unique index: { date: 1, time: 1, barberId: 1 }. Explain exactly how this prevents double-booking at the database level.
+18. You implemented IP rate limiting in the booking route: ipCount >= 50. How did you extract the user's IP address from the Next.js req.headers?
+19. In the Barber model, you embed timeOff as an array of objects. Why is this better than creating a separate TimeOff collection and linking them via ObjectIds?
+
+🔴 Tough
+20. In the /api/barbers/[id]/leave route, you use mongoose.startSession() and session.startTransaction(). Explain what a database transaction is and why it is absolutely vital when adding a leave date and canceling overlapping bookings simultaneously.
+21. What happens if the cancelResult (updating the bookings) throws an error during the transaction? How does session.abortTransaction() protect your data integrity?
+22. In your booking POST route, you specifically catch error.code === 11000. What does this MongoDB error code mean, and how does catching it provide a better user experience?
+
+⚙️ Domain 3: Next.js App Router & API Architecture
+These questions evaluate your understanding of server-side logic, API routing, and Next.js 13+ paradigms.
+
+🟢 Easy
+23. What is the difference between a route.ts file and a page.tsx file in the Next.js App Router?
+24. In your API routes, you use NextRequest and NextResponse. How do these differ from the standard Node.js req and res objects?
+25. How do you access query parameters (like ?date=2026-05-01) inside a GET route in the App Router?
+
+🟡 Moderate
+26. You commented // NEXT.JS 16 FIX: You MUST await params before using the id. Explain why dynamic route parameters (like [id]) are now treated as Promises in newer versions of Next.js.
+27. When an admin cancels a booking, you use a PATCH method instead of PUT. What is the RESTful difference between PATCH and PUT?
+28. In your auto-assign barber logic, you use a for...of loop with await Booking.findOne(). Why is this sequentially slower than using Promise.all(), and why might sequential execution actually be safer in this specific booking scenario?
+
+🔴 Tough
+29. If you deploy this app to Vercel, API routes have a maximum execution timeout (e.g., 10 to 15 seconds on the hobby tier). If your POST booking route takes too long because it's checking the schedules of 50 barbers, how would you optimize the MongoDB query to find an available barber in a single database call rather than a for loop?
+30. Your API routes are currently tightly coupled with your Mongoose logic. If you were asked to scale this application and separate the concerns, how would you implement a "Service Layer" or "Controller Pattern" in this Next.js structure?
+
+📅 Domain 4: The Core Business Logic (The Scheduling Engine)
+These questions test your ability to translate real-world business requirements into algorithmic logic.
+
+🟢 Easy
+31. In the availability logic, you define an array of allSlots from "10:00" to "21:30". How do you filter out times that have already passed if the user is booking for "today"?
+32. What JavaScript array method do you use to determine if at least one barber is available for a given time slot? (.some(), .every(), .map(), etc.)
+
+🟡 Moderate
+33. Walk me through your "Radar" logic in BarberGrid.tsx. What is the exact hierarchy of checks to determine if a slot is "booked", "off-shift", "lunch", "leave", or "free"?
+34. How do you handle date formatting consistently across the frontend and backend to avoid Timezone offset bugs? (e.g., toISOString().split("T")[0]).
+35. In your auto-assignment logic, if Barber A and Barber B are both free at 2:00 PM, how does your code currently decide who gets the appointment? How could you modify this to implement "Round Robin" or "Fair Load" assignment?
+
+🔴 Tough
+36. Let's talk about the "Concurrency Problem". User A and User B both load the booking page at 1:00 PM and see that the 3:00 PM slot is available. They both click "Confirm Booking" at the exact same millisecond. Walk me through the entire stack (React -> API -> MongoDB) and explain exactly how your architecture prevents both of them from getting the slot.
+Topic 5: System Design & Scalability (CRITICAL ADDITION)
+Easy (Concepts)
+What is the difference between horizontal scaling and vertical scaling in a web application?
+What is load balancing, and why is it necessary when traffic increases?
+What is caching, and how does it reduce backend load?
+Moderate (Your Project)
+Your availability API calculates slots in real time. How would you cache this data to improve performance?
+If your barber shop expands to multiple locations, how would you modify your Booking schema to support multiple branches?
+Currently, your system assigns barbers dynamically. How would you redesign this if users want to choose a specific barber manually?
+How would you redesign your booking system to support multiple concurrent users across different servers?
+Hard (Architecture Level)
+Your current availability algorithm runs in O(B × S × K). How would you redesign it using precomputed lookup maps or caching?
+If your app gets 10,000 booking requests per minute, how would you prevent database overload?
+How would you implement Redis caching for:
+availability slots
+rate limiting
+session storage
+How would you design a queue system (e.g., BullMQ) to handle booking spikes?
+If two users hit different servers at the same time, how do you guarantee global consistency (no double booking)?
+⚡ Topic 6: Performance & Optimization (MISSING DEPTH)
+Easy
+What is the difference between CPU-bound and I/O-bound operations?
+Moderate (Your Code)
+In your booking logic, you loop through barbers and run Booking.findOne() inside the loop. Why is this inefficient?
+What is the N+1 query problem, and does your code suffer from it?
+Why is .lean() faster than normal Mongoose queries?
+Hard
+How would you preload all bookings into a hash map (dictionary) to avoid repeated database calls?
+If your database grows to millions of bookings, how would you paginate and optimize queries?
+How would you use MongoDB aggregation ($lookup) instead of populate for large datasets?
+🔐 Topic 7: Advanced Security (VERY IMPORTANT)
+Easy
+What is CSRF, and how does NextAuth help prevent it?
+What is XSS, and where could it occur in your application?
+Moderate
+Your OTP uses Math.random(). Why is this insecure, and what should you use instead?
+How can a user bypass IP-based rate limiting using proxies?
+What is a JWT replay attack?
+Hard
+If an attacker steals your JWT token, what damage can they do, and how do you prevent it?
+How would you implement refresh tokens + access tokens instead of long-lived JWTs?
+How would you secure your API routes against automated bot attacks?
+🧠 Topic 8: Frontend Architecture & State Management
+Easy
+Why did you choose React Context instead of Redux or Zustand?
+What is the difference between Server Components and Client Components in Next.js?
+Moderate
+Why do you use useEffect for localStorage instead of accessing it directly?
+What causes hydration mismatch in Next.js?
+Why did you manually refetch bookings instead of using React Query or SWR?
+Hard
+How would you implement real-time updates (WebSockets) for admin dashboards?
+How would you sync cart state across multiple tabs?
+How would you handle offline booking attempts and sync later?
+🏗️ Topic 9: Product Thinking & Real-World Justification
+
+👉 THIS IS WHAT MOST PEOPLE MISS (and interviewers LOVE this)
+
+Moderate
+Why did you choose to build a barber booking system instead of another project?
+What real-world problem does your system solve?
+What are the biggest challenges in building a booking system?
+Hard
+If a real barber shop uses your system, what operational problems might still occur?
+How would you handle:
+no-shows
+late arrivals
+overbooking policies
+How would you monetize this product as a SaaS?
+🧩 Topic 10: Failure Handling & Reliability
+Easy
+What is graceful error handling?
+Moderate
+What happens if your database goes down during a booking request?
+What happens if your availability API fails?
+Hard
+How would you design your system for high availability (99.9% uptime)?
+How would you implement retries for failed booking requests?
+How would you log and monitor production errors (e.g., Sentry, logs)?
+⚠️ Topic 11: Code Review / Debugging Questions (VERY POWERFUL)
+
+👉 These directly match YOUR codebase
+
+Moderate
+Identify a bug in your OTP verification route and explain the fix.
+Identify a bug in your lunch break logic and explain its impact.
+Why is your Google login button currently not working?
+Hard
+Where can race conditions still occur in your booking system?
+Which part of your code will break first under heavy load and why?
+If your API suddenly becomes slow, how would you debug it step by step?
+🚀 Final Strategy (IMPORTANT)
+
+Now your prep file becomes:
+
+BEFORE:
+Strong technical questions
+AFTER:
+Technical + System Design + Real-world + Debugging
+
+👉 This is what converts you from:
+“good developer” → “hireable engineer”
+
+⚡ If you want next level
+
+I can now:
+
+✅ Turn ALL of this into perfect interview answers (not generic)
+✅ Create mock interview questions based on your exact code
+✅ Fix your weak areas (availability algorithm, scaling, etc.)
