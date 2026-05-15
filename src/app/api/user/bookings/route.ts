@@ -1,11 +1,23 @@
-import authOptions from "@/lib/authOptions";
-import { getServerSession } from "next-auth";
+'use client';
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-export async function GET(){
+
+const fetchBookings = async () => {
+    const router = useRouter();
+
     try {
-        const session = await getServerSession(authOptions)
-        if(!session)
+        const response = await fetch('/api/user/bookings');
+
+        if (response.status === 401) {
+            router.push('/login');
+            return; 
+        }
+
+        const data = await response.json();
+       
+
     } catch (error) {
-        
+        console.error("Failed to fetch data", error);
     }
 }
